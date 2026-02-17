@@ -5,9 +5,16 @@ import datetime
 from Ansys.Mechanical.DataModel.Enums import GraphicsAnimationExportFormat, ObjectState, ViewOrientationType
 
 # --- CONFIGURATION ---
-GROWTH_FACTOR = 1.5
-CAMERA_WAIT_TIME = 0.3
+# 1. Dataset Generation Settings
+MIN_PRESSURE = 1 # Starting pressure (Pa) (ANSYS doesn't allow zero for pressure BCs)
+MAX_PRESSURE = 150000 # Maximum pressure (Pa)
+STEP_SIZE = 30000 # Step size (Pa)
 
+# 2. Camera Settings
+GROWTH_FACTOR = 1.5      # Safety margin for zoom
+CAMERA_WAIT_TIME = 0.3   # Wait time for graphics to update (seconds)
+
+# 3. Output Paths
 desktop_path = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Desktop)
 base_folder = os.path.join(desktop_path, "SoftRobot_Dataset")
 
@@ -19,16 +26,24 @@ if not os.path.exists(main_output_folder):
 
 print("Saving Data to: " + main_output_folder)
 
-load_cases = [
-    (1, 1, 50000),      
-    (1, 1, 100000),
-    (1, 50000, 1),
-    (1, 100000, 1),
-    (50000, 1, 1),      
-    (100000, 1, 1),
-    (50000, 50000, 50000),
-    (100000, 100000, 100000)
-]
+# --- AUTOMATIC LOAD CASE GENERATOR ---
+# Generates all combinations: [0,0,0], [0,0,50k] ... [150k, 150k, 150k]
+load_cases = []
+pressure_levels = range(MIN_PRESSURE, MAX_PRESSURE + 1, STEP_SIZE)
+
+# Replace 0 with 1 Pa as ANSYS does not allow 0 pressure.
+pressure_levels = [p if p > 0 else 1 for p in pressure_levels]
+
+# Permute through all combinations of pressures for the 3 bellows
+print("--- Generating Load Cases ---")
+for p1 in pressure_levels:
+    for p2 in pressure_levels:
+        for p3 in pressure_levels:
+            load_cases.append((p1, p2, p3))
+
+print("   Pressure Levels: {}".format(list(pressure_levels)))
+print("   Total Cases Generated: {}".format(len(load_cases)))
+
 
 # --- HELPER FUNCTIONS ---
 def find_object(parent, name):
@@ -37,6 +52,7 @@ def find_object(parent, name):
     return None
 
 def calculate_geometry_zoom(mesh_data):
+    """ Scans mesh to find max dimension and calculates a fixed zoom level """
     print("--- Calculating Master Zoom ---")
     min_x, min_y, min_z = 1e9, 1e9, 1e9
     max_x, max_y, max_z = -1e9, -1e9, -1e9
@@ -65,7 +81,7 @@ def calculate_geometry_zoom(mesh_data):
     return master_zoom
 
 def set_camera_safe(view_type, master_zoom):
-    """ Sets view, centers, locks zoom, and waits. """
+    """ Sets view, centers robot, locks zoom, and waits for redraw """
     cam = ExtAPI.Graphics.Camera
     cam.SetSpecificViewOrientation(view_type)
     cam.SetFit()
@@ -103,13 +119,15 @@ def blocking_solve(analysis_obj, solution_obj):
     return True
 
 # --- MAIN SCRIPT ---
-print("--- Starting Corrected Dataset Generation ---")
+print("--- Starting Automated Soft Robot Dataset ---")
 analysis = ExtAPI.DataModel.Project.Model.Analyses[0]
 solution = analysis.Solution
 mesh_data = analysis.MeshData
 
+# 1. Calculate Zoom ONCE
 master_zoom = calculate_geometry_zoom(mesh_data)
 
+# 2. Find Tree Items
 p1 = find_object(analysis, "Pressure")
 p2 = find_object(analysis, "Pressure 2")
 p3 = find_object(analysis, "Pressure 3")
@@ -120,17 +138,20 @@ def_z = find_object(solution, "Deformation Z")
 eqv_strain = find_object(solution, "Equivalent Elastic Strain")
 
 if not (p1 and p2 and p3 and total_def and def_x and def_y and def_z and eqv_strain):
-    print("Error: Tree items missing.")
+    print("Error: Ensure you have 'Total Deformation' and all other results in the Tree.")
 else:
     try: total_def.DeformationScaling = 1 
     except: pass
 
+    # Loop through the automatically generated cases
     for i, case in enumerate(load_cases):
         case_num = i + 1
         val_p1, val_p2, val_p3 = case
         
         try:
-            print("\n=== Processing Case {}/{} ===".format(case_num, len(load_cases)))
+            print("\n=== Processing Case {}/{} [P1={}, P2={}, P3={}] ===".format(
+                case_num, len(load_cases), val_p1, val_p2, val_p3))
+            
             folder_name = "Case_{}_3bellows_{}_{}_{}".format(case_num, val_p1, val_p2, val_p3)
             case_folder = os.path.join(main_output_folder, folder_name)
             if not os.path.exists(case_folder): os.makedirs(case_folder)
@@ -143,30 +164,30 @@ else:
             
             if not blocking_solve(analysis, solution): continue
 
+            # Export CSVs
             export_csv(def_x, os.path.join(case_folder, base_name + "_DefX.csv"), mesh_data, case)
             export_csv(def_y, os.path.join(case_folder, base_name + "_DefY.csv"), mesh_data, case)
             export_csv(def_z, os.path.join(case_folder, base_name + "_DefZ.csv"), mesh_data, case)
             export_csv(eqv_strain, os.path.join(case_folder, base_name + "_Strain.csv"), mesh_data, case)
 
+            # Export Videos (Z-Up Mapped)
             print("   Exporting Videos...")
             total_def.Activate()
-            time.sleep(1.0) 
+            time.sleep(CAMERA_WAIT_TIME) 
             
-            # --- UPDATED MAPPINGS ---
-            
-            # 1. FRONT VIEW (Robot Standing Up) -> Use ANSYS 'Bottom'
+            # Front (Robot Standing Up) -> ANSYS Bottom
             set_camera_safe(ViewOrientationType.Bottom, master_zoom)
             total_def.ExportAnimation(os.path.join(case_folder, base_name + "_ViewFront.avi"), GraphicsAnimationExportFormat.AVI)
             
-            # 2. TOP VIEW (Gripper Face) -> Use ANSYS 'Front'
+            # Top (Gripper Face) -> ANSYS Front
             set_camera_safe(ViewOrientationType.Front, master_zoom)
             total_def.ExportAnimation(os.path.join(case_folder, base_name + "_ViewTop.avi"), GraphicsAnimationExportFormat.AVI)
 
-            # 3. SIDE VIEW (Profile) -> Use ANSYS 'Right'
+            # Side (Profile) -> ANSYS Right
             set_camera_safe(ViewOrientationType.Right, master_zoom)
             total_def.ExportAnimation(os.path.join(case_folder, base_name + "_ViewSide.avi"), GraphicsAnimationExportFormat.AVI)
             
-            # 4. ISO VIEW
+            # Iso View
             set_camera_safe(ViewOrientationType.Iso, master_zoom)
             total_def.ExportAnimation(os.path.join(case_folder, base_name + "_ViewIso.avi"), GraphicsAnimationExportFormat.AVI)
 
