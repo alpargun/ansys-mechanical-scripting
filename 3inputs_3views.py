@@ -15,10 +15,10 @@ if not os.path.exists(main_output_folder):
 load_cases = [
     (10, 10, 50000),      
     (10, 10, 100000),     
-    (50000, 10, 10),      
-    (100000, 10, 10),     
-    (10, 50000, 10),      
-    (50000, 50000, 50000) 
+    #(50000, 10, 10),      
+    #(100000, 10, 10),     
+    #(10, 50000, 10),      
+    #(50000, 50000, 50000) 
 ]
 
 # --- HELPER FUNCTIONS ---
@@ -119,6 +119,13 @@ else:
 
             base_name = "3bellows_{}_{}_{}".format(val_p1, val_p2, val_p3)
 
+             # --- MATH DATA: CSV Ground Truth ---
+            print("   Exporting CSV Data...")
+            export_csv(def_x, os.path.join(case_folder, base_name + "_DefX.csv"), mesh_data, case)
+            export_csv(def_y, os.path.join(case_folder, base_name + "_DefY.csv"), mesh_data, case)
+            export_csv(def_z, os.path.join(case_folder, base_name + "_DefZ.csv"), mesh_data, case)
+            export_csv(eqv_strain, os.path.join(case_folder, base_name + "_Strain.csv"), mesh_data, case)
+
             # --- VISUAL DATA: Total Deformation (Multi-View) ---
             print("   Exporting Multi-View Videos...")
             total_def.Activate()
@@ -127,29 +134,22 @@ else:
             ExtAPI.Graphics.Camera.SetSpecificView(0) 
             ExtAPI.Graphics.Camera.SetFit()
             ExtAPI.Graphics.Camera.Zoom(0.7) # Zoom OUT 30% for safety
-            time.sleep(1)
+            time.sleep(3)
             total_def.ExportAnimation(os.path.join(case_folder, base_name + "_ViewIso.avi"), GraphicsAnimationExportFormat.AVI)
             
             # View 2: Front (1)
             ExtAPI.Graphics.Camera.SetSpecificView(1)
             ExtAPI.Graphics.Camera.SetFit()
             ExtAPI.Graphics.Camera.Zoom(0.7)
-            time.sleep(1)
+            time.sleep(3)
             total_def.ExportAnimation(os.path.join(case_folder, base_name + "_ViewFront.avi"), GraphicsAnimationExportFormat.AVI)
             
             # View 3: Right (6) - Note: standard is usually 6 for Right, 5 for Left
             ExtAPI.Graphics.Camera.SetSpecificView(6)
             ExtAPI.Graphics.Camera.SetFit()
             ExtAPI.Graphics.Camera.Zoom(0.7)
-            time.sleep(1)
+            time.sleep(3)
             total_def.ExportAnimation(os.path.join(case_folder, base_name + "_ViewRight.avi"), GraphicsAnimationExportFormat.AVI)
-
-            # --- MATH DATA: CSV Ground Truth ---
-            print("   Exporting CSV Data...")
-            export_csv(def_x, os.path.join(case_folder, base_name + "_DefX.csv"), mesh_data, case)
-            export_csv(def_y, os.path.join(case_folder, base_name + "_DefY.csv"), mesh_data, case)
-            export_csv(def_z, os.path.join(case_folder, base_name + "_DefZ.csv"), mesh_data, case)
-            export_csv(eqv_strain, os.path.join(case_folder, base_name + "_Strain.csv"), mesh_data, case)
 
             print("   Case {} Complete!".format(case_num))
             
