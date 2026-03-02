@@ -11,7 +11,7 @@ MAX_PRESSURE = 150000 # Maximum pressure (Pa)
 STEP_SIZE = 30000 # Step size (Pa)
 
 # 2. Camera Settings
-GROWTH_FACTOR = 1.5      # Safety margin for zoom
+GROWTH_FACTOR = 2      # Safety margin for zoom
 CAMERA_WAIT_TIME = 0.3   # Wait time for graphics to update (seconds)
 
 # 3. Output Paths
