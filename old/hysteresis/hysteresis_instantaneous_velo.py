@@ -9,8 +9,8 @@ from Ansys.ACT.Math import Vector3D
 # --- CONFIGURATION ---
 # ==========================================
 MIN_PRESSURE = 1       
-MAX_PRESSURE = 100001  
-STEP_SIZE = 100000      
+MAX_PRESSURE = 100000  
+STEP_SIZE = 25000      
 
 GROWTH_FACTOR = 2.0    
 CAMERA_WAIT_TIME = 0.5 
@@ -43,18 +43,13 @@ def setup_analysis_steps(analysis):
     settings.LargeDeflection = True
     settings.LineSearch = LineSearchType.On
     
-    # SPEED HACK: Turn off massive data files we don't need
-    settings.OutputControls.CalculateStress = False
-    settings.OutputControls.CalculateContactMisc = False
-    # Keep Strain True because you are logging it
-    
     for step in [1, 2]:
         settings.SetAutomaticTimeStepping(step, AutomaticTimeStepping.On)
         settings.SetInitialSubsteps(step, 25)  
         settings.SetMinimumSubsteps(step, 10)   
-        settings.SetMaximumSubsteps(step, 400) # Lowered to trigger fast-fails if impossible
+        settings.SetMaximumSubsteps(step, 400) # Fast-fail ceiling
         
-    print("   Steps configured. Output Controls optimized for speed.")
+    print("   Steps configured. Line Search ON.")
 
 def set_load_schedule(load_obj, peak_val):
     times = [Quantity("0 [s]"), Quantity("1 [s]"), Quantity("2 [s]")]
@@ -65,16 +60,13 @@ def set_load_schedule(load_obj, peak_val):
 def get_interpolated_pressure(t_target, times_qty, pressures_qty):
     """ 
     Future-Proof: Calculates the exact instantaneous pressure at any given time 't_target' 
-    based on the tabular data array. Works for simple ramps AND future random walks.
     """
     times = [float(qty.Value) for qty in times_qty]
     pressures = [float(qty.Value) for qty in pressures_qty]
     
-    # Handle bounds
     if t_target <= times[0]: return pressures[0]
     if t_target >= times[-1]: return pressures[-1]
     
-    # Linear interpolation
     for i in range(len(times) - 1):
         t0, t1 = times[i], times[i+1]
         p0, p1 = pressures[i], pressures[i+1]
@@ -125,24 +117,20 @@ def export_consolidated_data(case_folder, base_name, mesh_data, load_p1, load_p2
     file_path = os.path.join(case_folder, base_name + "_Data.csv")
     
     # SPEED HACK: Pre-cache node geometry into a Python dictionary. 
-    # This turns a 5-minute export process into a 5-second export process.
     nodes_cache = {}
     for node in mesh_data.Nodes:
         nodes_cache[node.Id] = {'X': node.X, 'Y': node.Y, 'Z': node.Z}
         
-    # Generate exactly 60 time steps evenly spaced over 2 seconds
     time_steps = [round((i + 1) * (2.0 / VIDEO_FRAMES), 4) for i in range(VIDEO_FRAMES)]
     
     with open(file_path, "w") as f:
         f.write("Time(s), NodeID, X_und(m), Y_und(m), Z_und(m), DefX(m), DefY(m), DefZ(m), Strain, Inst_P1(Pa), Inst_P2(Pa), Inst_P3(Pa)\n")
         
         for t in time_steps:
-            # 1. Calculate Instantaneous Pressures for this specific frame
             inst_p1 = get_interpolated_pressure(t, load_p1.Magnitude.Inputs[0].DiscreteValues, load_p1.Magnitude.Output.DiscreteValues)
             inst_p2 = get_interpolated_pressure(t, load_p2.Magnitude.Inputs[0].DiscreteValues, load_p2.Magnitude.Output.DiscreteValues)
             inst_p3 = get_interpolated_pressure(t, load_p3.Magnitude.Inputs[0].DiscreteValues, load_p3.Magnitude.Output.DiscreteValues)
             
-            # 2. Update Result Objects to current time frame
             def_x.DisplayTime = Quantity(str(t) + " [s]")
             def_y.DisplayTime = Quantity(str(t) + " [s]")
             def_z.DisplayTime = Quantity(str(t) + " [s]")
@@ -153,7 +141,6 @@ def export_consolidated_data(case_folder, base_name, mesh_data, load_p1, load_p2
             def_z.EvaluateAllResults()
             strain.EvaluateAllResults()
             
-            # 3. Fast Data Extraction
             frame_data = {}
             def extract_fast(res_obj, key):
                 if res_obj.PlotData:
@@ -172,7 +159,6 @@ def export_consolidated_data(case_folder, base_name, mesh_data, load_p1, load_p2
             extract_fast(def_z, 'dz')
             extract_fast(strain, 'strain')
             
-            # 4. Write frame to CSV
             for nid, vals in frame_data.items():
                 f.write("{:.4f}, {}, {:.6f}, {:.6f}, {:.6f}, {:.6e}, {:.6e}, {:.6e}, {:.6e}, {:.2f}, {:.2f}, {:.2f}\n".format(
                     t, nid, nodes_cache[nid]['X'], nodes_cache[nid]['Y'], nodes_cache[nid]['Z'],
