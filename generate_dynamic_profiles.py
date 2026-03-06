@@ -37,15 +37,26 @@ def generate_ansys_profiles():
     # ==========================================
     # --- 2. PRBS (PSEUDO-RANDOM BINARY STEPS) ---
     # ==========================================
-    # Generates sudden, random jumps to shock the system
-    for i in range(5):
-        p1 = np.ones(FRAMES) * MIN_P
-        for step in range(0, FRAMES, 10): # Change pressure every 10 frames
-            p1[step:step+10] = np.random.uniform(MIN_P, MAX_P)
+    # Generates sudden, random jumps to shock the system.
+    # FIXED: Evenly distributes the signals across all 3 chambers!
+    for i in range(6):
+        target_chamber = i % 3  # Cycles through 0, 1, 2
+        
+        # Generate the random step signal
+        p_active = np.ones(FRAMES) * MIN_P
+        for step in range(0, FRAMES, 10): 
+            p_active[step:step+10] = np.random.uniform(MIN_P, MAX_P)
             
-        # Keep other chambers at min to isolate the bend
-        p2, p3 = np.ones(FRAMES) * MIN_P, np.ones(FRAMES) * MIN_P
-        save_csv(f"PRBS_SingleChamber_{i+1}.csv", p1, p2, p3)
+        # Apply the active signal to the correct chamber
+        p1, p2, p3 = np.ones(FRAMES) * MIN_P, np.ones(FRAMES) * MIN_P, np.ones(FRAMES) * MIN_P
+        if target_chamber == 0:
+            p1 = p_active
+        elif target_chamber == 1:
+            p2 = p_active
+        else:
+            p3 = p_active
+            
+        save_csv(f"PRBS_SingleChamber_C{target_chamber+1}_run{i//3 + 1}.csv", p1, p2, p3)
 
     # ==========================================
     # --- 3. CHIRP SIGNALS (FREQUENCY SWEEP) ---
@@ -62,7 +73,7 @@ def generate_ansys_profiles():
         elif i == 1: p2 = c_signal
         else: p3 = c_signal
             
-        save_csv(f"Chirp_Sweep_{i+1}.csv", p1, p2, p3)
+        save_csv(f"Chirp_Sweep_C{i+1}.csv", p1, p2, p3)
 
     # ==========================================
     # --- 4. MULTI-CHAMBER CHAOS ---
