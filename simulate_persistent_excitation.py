@@ -19,17 +19,14 @@ CAMERA_WAIT_TIME = 0.5
 desktop_path = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Desktop)
 base_folder = os.path.join(desktop_path, "SoftRobot_Dataset_Hysteresis")
 
-# UPDATE THIS LINE to switch between "Persistent_Excitation_Random.csv" and "Persistent_Excitation_Chirp.csv"
-csv_input_path = os.path.join(desktop_path, "Persistent_Excitation_Random.csv")
+# Generate one master timestamp for the entire batch
+batch_timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-main_output_folder = os.path.join(base_folder, "Run_PersistentExcitation_30FPS_" + timestamp)
-
-if not os.path.exists(main_output_folder):
-    os.makedirs(main_output_folder)
-
-print("Reading Data from: " + csv_input_path)
-print("Saving 30 FPS Visual Data to: " + main_output_folder)
+# Define our sequence of runs
+run_sequence = [
+    {"filename": "Persistent_Excitation_Random.csv", "type": "Random"},
+    {"filename": "Persistent_Excitation_Chirp.csv", "type": "Chirp"}
+]
 
 # ==========================================
 # --- HELPER FUNCTIONS ---
@@ -40,7 +37,6 @@ def find_object(parent, name):
     return None
 
 def setup_analysis_steps(analysis):
-    print("--- Configuring Analysis for 15 Hz Dynamic Solve ---")
     settings = analysis.AnalysisSettings
     settings.NumberOfSteps = 1
     settings.SetStepEndTime(1, Quantity(str(DURATION) + " [s]"))
@@ -49,12 +45,11 @@ def setup_analysis_steps(analysis):
     settings.LineSearch = LineSearchType.On
     settings.SolverType = SolverType.Iterative 
     
-    # TIGHTENED AUTO-STEPPING FOR 15 HZ EXCITATION
+    # TIGHTENED AUTO-STEPPING FOR HIGH-FREQUENCY DYNAMICS
     settings.SetAutomaticTimeStepping(1, AutomaticTimeStepping.On)
-    settings.SetInitialSubsteps(1, 6000)   # 100 Hz (Matches Python CSV Generation)
-    settings.SetMinimumSubsteps(1, 1800)   # 30 Hz (Never skip a video frame)
-    settings.SetMaximumSubsteps(1, 24000)  # Allow deep bisection for violent resonance
-        
+    settings.SetInitialSubsteps(1, 6000)   # 100 Hz Physics Resolution
+    settings.SetMinimumSubsteps(1, 6000)   # NEVER drop below 100 Hz
+    settings.SetMaximumSubsteps(1, 60000)  # 1000 Hz deep bisection for violent resonance
     print("    Dynamic Auto-Stepping configured.")
 
 def load_csv_to_tabular_data(csv_path, load_p1, load_p2, load_p3):
@@ -116,9 +111,9 @@ def set_camera_custom(view_x, view_y, view_z, up_x, up_y, up_z, master_zoom):
 def blocking_solve(analysis_obj, solution_obj):
     print("      [Solver]: Clearing old results before starting...")
     solution_obj.ClearGeneratedData()
-    time.sleep(0.5)
+    time.sleep(1.0) 
         
-    print("      [Solver]: Starting High-Frequency 60-Second Iterative Solve...")
+    print("      [Solver]: Starting Iterative Solve...")
     analysis_obj.Solve()
     
     solve_start = time.time()
@@ -168,64 +163,95 @@ def export_safe_tip_data(output_folder, base_name, total_def, solution_obj):
             f.write("{:.5f}, {:.6f}\n".format(t, max_val))
 
 # ==========================================
-# --- MAIN EXECUTION ---
+# --- MAIN BATCH EXECUTION ---
 # ==========================================
-print("--- Starting Persistent Excitation ID (30 FPS) ---")
+print("--- Starting Automated Batch Excitation Run ---")
 
-if not os.path.exists(csv_input_path):
-    print("ERROR: Could not find {} on the Desktop!".format(csv_input_path))
+analysis = ExtAPI.DataModel.Project.Model.Analyses[0]
+solution = analysis.Solution
+mesh_data = analysis.MeshData
+
+p1 = find_object(analysis, "Pressure")
+p2 = find_object(analysis, "Pressure 2")
+p3 = find_object(analysis, "Pressure 3")
+total_def = find_object(solution, "Total Deformation")
+
+if not (p1 and p2 and p3 and total_def):
+    print("Error: Missing required loads or Deformation results. Check your object tree.")
 else:
-    analysis = ExtAPI.DataModel.Project.Model.Analyses[0]
-    solution = analysis.Solution
-    mesh_data = analysis.MeshData
-
+    try: total_def.DeformationScaling = 1 
+    except: pass
+    
     setup_analysis_steps(analysis)
+    
+    # Calculate zoom ONCE. The geometry doesn't change, so this remains safe for all runs.
     master_zoom = calculate_geometry_zoom(mesh_data)
 
-    p1 = find_object(analysis, "Pressure")
-    p2 = find_object(analysis, "Pressure 2")
-    p3 = find_object(analysis, "Pressure 3")
-    total_def = find_object(solution, "Total Deformation")
+    for run in run_sequence:
+        csv_filename = run["filename"]
+        run_type = run["type"]
+        csv_input_path = os.path.join(desktop_path, csv_filename)
+        
+        print("\n==================================================")
+        print(">>> NOW PROCESSING: {} ({})".format(csv_filename, run_type))
+        print("==================================================")
 
-    if not (p1 and p2 and p3 and total_def):
-        print("Error: Missing required loads or Deformation results.")
-    else:
-        try: total_def.DeformationScaling = 1 
-        except: pass
+        if not os.path.exists(csv_input_path):
+            print("ERROR: Could not find {} on the Desktop! Skipping...".format(csv_filename))
+            continue
+            
+        folder_name = "Run_PersistentExcitation_" + run_type + "_30FPS_" + batch_timestamp
+        main_output_folder = os.path.join(base_folder, folder_name)
+        
+        if not os.path.exists(main_output_folder):
+            os.makedirs(main_output_folder)
 
+        # 1. Load Data
         load_csv_to_tabular_data(csv_input_path, p1, p2, p3)
         
+        # 2. Block and Solve
         success, msg = blocking_solve(analysis, solution)
+        
         if not success:
-            print("      !!! SOLVE FAILED: {} !!!".format(msg))
-        else:
-            base_name = "PersistentExcitation_30FPS_60s"
+            print("      !!! SOLVE FAILED FOR {}: {} !!!".format(run_type, msg))
+            continue 
             
-            print("      Exporting 30 FPS Pressure Profile...")
-            export_30fps_pressure_profile(main_output_folder, base_name, p1, p2, p3)
+        # 3. Export Results
+        base_name = "PersistentExcitation_" + run_type + "_30FPS_60s"
+        
+        print("      Exporting 30 FPS Pressure Profile...")
+        export_30fps_pressure_profile(main_output_folder, base_name, p1, p2, p3)
 
-            print("      Exporting Tip Displacement CSV (1800 Frames)...")
-            export_safe_tip_data(main_output_folder, base_name, total_def, solution)
+        print("      Exporting Tip Displacement CSV (1800 Frames)...")
+        export_safe_tip_data(main_output_folder, base_name, total_def, solution)
 
-            print("      Exporting Videos ({} Frames)...".format(VIDEO_FRAMES))
-            total_def.Activate()
-            total_def.DisplayTime = Quantity(str(DURATION) + " [s]") 
-            total_def.EvaluateAllResults()
-            time.sleep(CAMERA_WAIT_TIME)
-            
-            ExtAPI.Graphics.ResultAnimationOptions.NumberOfFrames = VIDEO_FRAMES
-            ExtAPI.Graphics.ResultAnimationOptions.Duration = Quantity(DURATION, "s")
-            
-            set_camera_custom(1, 0, 0, 0, 0, 1, master_zoom)
-            total_def.ExportAnimation(os.path.join(main_output_folder, base_name + "_ViewSide1.avi"), GraphicsAnimationExportFormat.AVI)
-            
-            set_camera_custom(0, 1, 0, 0, 0, 1, master_zoom)
-            total_def.ExportAnimation(os.path.join(main_output_folder, base_name + "_ViewSide2.avi"), GraphicsAnimationExportFormat.AVI)
+        print("      Exporting Videos ({} Frames)...".format(VIDEO_FRAMES))
+        total_def.Activate()
+        total_def.DisplayTime = Quantity(str(DURATION) + " [s]") 
+        total_def.EvaluateAllResults()
+        time.sleep(CAMERA_WAIT_TIME)
+        
+        ExtAPI.Graphics.ResultAnimationOptions.NumberOfFrames = VIDEO_FRAMES
+        ExtAPI.Graphics.ResultAnimationOptions.Duration = Quantity(DURATION, "s")
+        
+        # Save 4 Views
+        set_camera_custom(1, 0, 0, 0, 0, 1, master_zoom)
+        total_def.ExportAnimation(os.path.join(main_output_folder, base_name + "_ViewSide1.avi"), GraphicsAnimationExportFormat.AVI)
+        
+        set_camera_custom(0, 1, 0, 0, 0, 1, master_zoom)
+        total_def.ExportAnimation(os.path.join(main_output_folder, base_name + "_ViewSide2.avi"), GraphicsAnimationExportFormat.AVI)
 
-            set_camera_custom(-1, 0, 0, 0, 0, 1, master_zoom)
-            total_def.ExportAnimation(os.path.join(main_output_folder, base_name + "_ViewSide3.avi"), GraphicsAnimationExportFormat.AVI)
-            
-            set_camera_custom(0, 0, 1, 1, 0, 0, master_zoom)
-            total_def.ExportAnimation(os.path.join(main_output_folder, base_name + "_ViewTop.avi"), GraphicsAnimationExportFormat.AVI)
+        set_camera_custom(-1, 0, 0, 0, 0, 1, master_zoom)
+        total_def.ExportAnimation(os.path.join(main_output_folder, base_name + "_ViewSide3.avi"), GraphicsAnimationExportFormat.AVI)
+        
+        set_camera_custom(0, 0, 1, 1, 0, 0, master_zoom)
+        total_def.ExportAnimation(os.path.join(main_output_folder, base_name + "_ViewTop.avi"), GraphicsAnimationExportFormat.AVI)
 
-            print("\nPersistent Excitation Run Finished. 30 FPS Files Generated.")
+        print(">>> FINISHED: {} pipeline successfully completed.".format(run_type))
+
+        # 4. Critical Memory Management
+        print("      [Memory Check] Clearing generated results to free RAM...")
+        solution.ClearGeneratedData()
+        System.GC.Collect() # Force the .NET garbage collector to dump the gigabytes of node states
+
+print("\nAll batch runs complete!")
