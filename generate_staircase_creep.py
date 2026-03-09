@@ -39,7 +39,7 @@ def main():
     
     # --- THE PHYSICAL FIX ---
     # Dropped from 100.0 to 40.0 to prevent 60-second creep ballooning
-    MAX_PRESSURE = 50.0 
+    MAX_PRESSURE = 90.0 
     
     NUM_STEPS = 10 
     
