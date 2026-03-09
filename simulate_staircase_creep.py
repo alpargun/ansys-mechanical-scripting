@@ -12,13 +12,13 @@ from Ansys.ACT.Math import Vector3D
 MIN_PRESSURE = 1       
 DURATION = 60.0        
 FPS = 30
-VIDEO_FRAMES = DURATION * FPS # 60s * 30 FPS = 1800 Frames
+VIDEO_FRAMES = int(DURATION * FPS) # 60s * 30 FPS = 1800 Frames
 GROWTH_FACTOR = 2.0    
 CAMERA_WAIT_TIME = 0.5 
 
 desktop_path = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Desktop)
 base_folder = os.path.join(desktop_path, "SoftRobot_Dataset_Hysteresis")
-csv_input_path = os.path.join(desktop_path, "Staircase_Creep_Test.csv")
+csv_input_path = os.path.join(desktop_path, "Staircase_Creep_Test_Safe.csv")
 
 timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 main_output_folder = os.path.join(base_folder, "Run_Staircase_30FPS_" + timestamp)
