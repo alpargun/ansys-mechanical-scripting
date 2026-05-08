@@ -9,12 +9,11 @@ from Ansys.ACT.Math import Vector3D
 # ==========================================
 # --- CONFIGURATION (RANDOM WALK PROFILE) ---
 # ==========================================
-# We enforce exactly 1 Pa as the absolute physical floor to prevent vacuum crashes [cite: 2026-02-17].
 MIN_PRESSURE = 1       
 MAX_PRESSURE = 100000  
 
 # Random Walk Specifics
-NUM_RANDOM_VIDEOS = 15     # 15 videos of 30 seconds is a massive continuous dataset
+NUM_RANDOM_VIDEOS = 15     # 15 videos of 30 seconds
 DURATION = 30.0            # 30-second long continuous wandering
 WAYPOINT_INTERVAL = 3.0    # Changes pressure target every 3 seconds to ensure smooth, achievable ramps
 
@@ -24,9 +23,9 @@ VIDEO_FRAMES = int(DURATION * FPS) # Yields exactly 900 frames per video
 GROWTH_FACTOR = 2.0     # Keeps the camera bounds identical to the old 125-case dataset
 CAMERA_WAIT_TIME = 0.5 
 
-# Setup output directories on the Desktop
+# Setup output directories
 desktop_path = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Desktop)
-base_folder = os.path.join(desktop_path, "SoftRobot_Dataset_RandomWalk")
+base_folder = os.path.join(desktop_path, "SoftRobot_Dataset_Hysteresis")
 timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 main_output_folder = os.path.join(base_folder, "Run_RandomWalk_" + timestamp)
 
@@ -281,10 +280,10 @@ else:
                 print("      !!! SOLVE FAILED: {} !!!".format(msg))
                 print("      [Hard Reset]: Flushing corrupted MAPDL matrix...")
                 
-                # --- MAPDL FLUSH TRICK ---
+                # --- MAPDL FLUSH ---
                 # When extreme asymmetric cases fail, the matrix gets trapped in a deformed state.
                 # Toggling 'Suppressed' tricks Ansys into permanently wiping the old matrix 
-                # and snapping the robot back to its un-deformed state, saving the 16GB RAM.
+                # and snapping the robot back to its un-deformed state, saving the RAM.
                 p1.Suppressed = True
                 p1.Suppressed = False
                 
@@ -292,13 +291,12 @@ else:
                 garbage_collect_solver_files(solution) 
                 continue # Skip the exports and move to the next case safely
             
-            # Formulate the folder names
             base_name = "RandomWalk_{}".format(case_num)
             folder_name = "Case_{}_{}".format(case_num, base_name)
             case_folder = os.path.join(main_output_folder, folder_name)
             if not os.path.exists(case_folder): os.makedirs(case_folder)
 
-            # Execute the massive exports
+            # Exports
             print("      Exporting Time/Pressure Profile (kPa)...")
             export_pressure_profile(case_folder, base_name, p1, p2, p3)
 
@@ -314,7 +312,7 @@ else:
             ExtAPI.Graphics.ResultAnimationOptions.NumberOfFrames = VIDEO_FRAMES
             ExtAPI.Graphics.ResultAnimationOptions.Duration = Quantity(DURATION, "s")
             
-            # Export all 4 camera views precisely
+            # Export all 4 camera views
             set_camera_custom(1, 0, 0, 0, 0, 1, master_zoom)
             total_def.ExportAnimation(os.path.join(case_folder, base_name + "_ViewSide1.avi"), GraphicsAnimationExportFormat.AVI)
             
@@ -329,7 +327,7 @@ else:
 
             print("      Case {} Complete.".format(case_num))
             
-            # Final RAM dump before moving to the next case
+            # Final RAM cleanup before moving to the next case
             garbage_collect_solver_files(solution)
             
         except Exception as e:
